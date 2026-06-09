@@ -1,9 +1,10 @@
 import { useState } from "react"
 import { useGameStore } from "@/store/gameStore"
 import { RARITY_LABELS, RARITY_COLORS } from "@/types"
-import type { TradeItem, TradeItemType } from "@/types"
+import type { TradeItem, TradeItemType, Rarity } from "@/types"
 import { isPriceInRange, calculateSuggestedPrice, getAvgPrice7d, generateTradeId } from "@/engine/priceEngine"
 import { ShoppingBag, Tag, TrendingUp, DollarSign, Search, Filter } from "lucide-react"
+import { LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer } from "recharts"
 
 function PriceBadge({ price, suggestedMin, suggestedMax }: { price: number; suggestedMin: number; suggestedMax: number }) {
   const range = isPriceInRange(price, suggestedMin, suggestedMax)
@@ -95,7 +96,7 @@ function MarketCard({ item, onBuy, playerGold }: { item: TradeItem; onBuy: () =>
 }
 
 function SellPanel() {
-  const { player, listMarketItem } = useGameStore()
+  const { player, listMarketItem, priceHistory } = useGameStore()
   const [selectedAirshipIdx, setSelectedAirshipIdx] = useState(0)
   const [selectedPartKey, setSelectedPartKey] = useState<string>("")
   const [sellPrice, setSellPrice] = useState("")
@@ -112,8 +113,8 @@ function SellPanel() {
 
   const selectedPart = parts.find((p) => p.key === selectedPartKey)
   const componentCategory = selectedPart ? (selectedPart.key === "special" ? "special" : selectedPart.key) : undefined
-  const suggested = selectedPart ? calculateSuggestedPrice(0, selectedPart.comp.rarity, componentCategory) : null
-  const avgPrice = selectedPart ? getAvgPrice7d(selectedPart.comp.rarity, componentCategory) : 0
+  const suggested = selectedPart ? calculateSuggestedPrice(priceHistory, selectedPart.comp.rarity, componentCategory) : null
+  const avgPrice = selectedPart ? getAvgPrice7d(priceHistory, selectedPart.comp.rarity, componentCategory) : 0
 
   function handleList() {
     if (!selectedPart) return
@@ -242,6 +243,244 @@ function SellPanel() {
   )
 }
 
+const STATUS_STYLES: Record<string, { color: string; bg: string; label: string }> = {
+  active: { color: "#fff", bg: "#22C55E", label: "出售中" },
+  sold: { color: "#fff", bg: "#EAB308", label: "已售出" },
+  cancelled: { color: "#fff", bg: "#6B7280", label: "已取消" },
+}
+
+function MyListings() {
+  const { playerListings, priceHistory } = useGameStore()
+
+  if (playerListings.length === 0) {
+    return (
+      <div
+        style={{
+          border: "1px solid #2d2d44",
+          borderRadius: 8,
+          padding: 16,
+          backgroundColor: "#1a1a2e",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700, fontSize: 15, color: "#e0e0e0", marginBottom: 10 }}>
+          <ShoppingBag size={18} />
+          我的上架
+        </div>
+        <div style={{ color: "#6b7280", fontSize: 13, textAlign: "center", padding: "12px 0" }}>
+          暂无上架物品
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div
+      style={{
+        border: "1px solid #2d2d44",
+        borderRadius: 8,
+        padding: 16,
+        backgroundColor: "#1a1a2e",
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700, fontSize: 15, color: "#e0e0e0" }}>
+        <ShoppingBag size={18} />
+        我的上架
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {playerListings.map((listing) => {
+          const statusStyle = STATUS_STYLES[listing.status] || STATUS_STYLES.cancelled
+          const suggested = calculateSuggestedPrice(priceHistory, listing.rarity, listing.category)
+          return (
+            <div
+              key={listing.id}
+              style={{
+                border: "1px solid #2d2d44",
+                borderRadius: 6,
+                padding: 10,
+                backgroundColor: "#0f0f1a",
+                display: "flex",
+                flexDirection: "column",
+                gap: 6,
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontWeight: 600, fontSize: 13, color: "#e0e0e0" }}>{listing.itemName}</span>
+                <div style={{ display: "flex", gap: 4 }}>
+                  <span
+                    style={{
+                      padding: "1px 6px",
+                      borderRadius: 3,
+                      fontSize: 10,
+                      fontWeight: 600,
+                      color: "#fff",
+                      backgroundColor: RARITY_COLORS[listing.rarity],
+                    }}
+                  >
+                    {RARITY_LABELS[listing.rarity]}
+                  </span>
+                  <span
+                    style={{
+                      padding: "1px 6px",
+                      borderRadius: 3,
+                      fontSize: 10,
+                      fontWeight: 600,
+                      color: statusStyle.color,
+                      backgroundColor: statusStyle.bg,
+                    }}
+                  >
+                    {statusStyle.label}
+                  </span>
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+                <DollarSign size={12} style={{ color: "#fbbf24" }} />
+                <span style={{ color: "#fbbf24", fontWeight: 600 }}>{listing.price} 金币</span>
+                {listing.status === "active" && (
+                  <PriceBadge price={listing.price} suggestedMin={suggested.min} suggestedMax={suggested.max} />
+                )}
+              </div>
+              {listing.status === "active" && (
+                <div style={{ fontSize: 10, color: "#6b7280" }}>
+                  建议价格：{suggested.min} - {suggested.max} 金币
+                </div>
+              )}
+              {listing.status === "sold" && listing.soldAt && (
+                <div style={{ fontSize: 10, color: "#6b7280" }}>
+                  售出时间：{new Date(listing.soldAt).toLocaleString()}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+const RARITY_LINE_COLORS: Record<Rarity, string> = {
+  common: "#9CA3AF",
+  rare: "#3B82F6",
+  epic: "#A855F7",
+  legendary: "#F59E0B",
+}
+
+function PriceTrendChart() {
+  const { priceHistory } = useGameStore()
+
+  const rarities: Rarity[] = ["common", "rare", "epic", "legendary"]
+
+  const groupedByRarity: Record<string, { index: number; price: number; timestamp: number }[]> = {}
+  for (const rarity of rarities) {
+    const entries = priceHistory
+      .filter((e) => e.rarity === rarity)
+      .slice(-7)
+      .map((e, i) => ({ index: i + 1, price: e.price, timestamp: e.timestamp }))
+    if (entries.length > 0) {
+      groupedByRarity[rarity] = entries
+    }
+  }
+
+  const activeRarities = rarities.filter((r) => groupedByRarity[r])
+
+  if (activeRarities.length === 0) {
+    return (
+      <div
+        style={{
+          border: "1px solid #2d2d44",
+          borderRadius: 8,
+          padding: 16,
+          backgroundColor: "#1a1a2e",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700, fontSize: 15, color: "#e0e0e0", marginBottom: 10 }}>
+          <TrendingUp size={18} />
+          价格走势
+        </div>
+        <div style={{ color: "#6b7280", fontSize: 13, textAlign: "center", padding: "20px 0" }}>
+          暂无价格历史数据
+        </div>
+      </div>
+    )
+  }
+
+  const maxLen = Math.max(...activeRarities.map((r) => groupedByRarity[r].length))
+  const chartData: Record<string, number | string>[] = []
+  for (let i = 0; i < maxLen; i++) {
+    const point: Record<string, number | string> = { index: i + 1 }
+    for (const rarity of activeRarities) {
+      const entries = groupedByRarity[rarity]
+      if (i < entries.length) {
+        point[rarity] = entries[i].price
+      }
+    }
+    chartData.push(point)
+  }
+
+  return (
+    <div
+      style={{
+        border: "1px solid #2d2d44",
+        borderRadius: 8,
+        padding: 16,
+        backgroundColor: "#1a1a2e",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700, fontSize: 15, color: "#e0e0e0", marginBottom: 10 }}>
+        <TrendingUp size={18} />
+        价格走势
+      </div>
+      <div style={{ display: "flex", gap: 12, marginBottom: 10 }}>
+        {activeRarities.map((rarity) => (
+          <div key={rarity} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <span
+              style={{
+                display: "inline-block",
+                width: 10,
+                height: 3,
+                borderRadius: 2,
+                backgroundColor: RARITY_LINE_COLORS[rarity],
+              }}
+            />
+            <span style={{ fontSize: 11, color: RARITY_LINE_COLORS[rarity] }}>{RARITY_LABELS[rarity]}</span>
+          </div>
+        ))}
+      </div>
+      <ResponsiveContainer width="100%" height={200}>
+        <LineChart data={chartData}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#2d2d44" />
+          <XAxis dataKey="index" tick={{ fontSize: 11, fill: "#6b7280" }} stroke="#2d2d44" />
+          <YAxis tick={{ fontSize: 11, fill: "#6b7280" }} stroke="#2d2d44" />
+          <Tooltip
+            contentStyle={{
+              backgroundColor: "#1a1a2e",
+              border: "1px solid #2d2d44",
+              borderRadius: 6,
+              fontSize: 12,
+              color: "#e0e0e0",
+            }}
+            labelStyle={{ color: "#9ca3af" }}
+          />
+          {activeRarities.map((rarity) => (
+            <Line
+              key={rarity}
+              type="monotone"
+              dataKey={rarity}
+              stroke={RARITY_LINE_COLORS[rarity]}
+              strokeWidth={2}
+              dot={{ r: 3, fill: RARITY_LINE_COLORS[rarity] }}
+              connectNulls
+              name={RARITY_LABELS[rarity]}
+            />
+          ))}
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
 export default function Market() {
   const { marketItems, announcements, buyMarketItem, player } = useGameStore()
   const [search, setSearch] = useState("")
@@ -309,10 +548,13 @@ export default function Market() {
           )}
         </div>
 
-        <div style={{ width: 280, flexShrink: 0 }}>
+        <div style={{ width: 280, flexShrink: 0, display: "flex", flexDirection: "column", gap: 16 }}>
           <SellPanel />
+          <MyListings />
         </div>
       </div>
+
+      <PriceTrendChart />
 
       <div
         style={{

@@ -1,13 +1,19 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
-import type { Airship, AirshipComponent, AirshipType, CrewMember, Airspace, BattleReport, Outpost, TradeItem, Announcement, LeaderboardEntry, WeeklyReport, BattleState, ExplorationEvent } from "@/types"
+import type {
+  Airship, AirshipComponent, AirshipType, CrewMember, Airspace,
+  BattleReport, Outpost, TradeItem, Announcement, LeaderboardEntry,
+  WeeklyReport, BattleState, ExplorationEvent, FlightRoute, RouteProgress,
+  GuildWarRecord, GuildSeasonState, SellRecord, PriceHistoryEntry, RouteNode,
+} from "@/types"
 import { KEEL_COMPONENTS, ENGINE_COMPONENTS, SAIL_COMPONENTS, SPECIAL_COMPONENTS } from "@/data/components"
 import { generateInitialCrew, generateRecruitmentPool } from "@/data/crew"
-import { INITIAL_AIRSPACES, GUILD_DATA } from "@/data/airspace"
+import { INITIAL_AIRSPACES, GUILD_NAMES, GUILD_COLORS } from "@/data/airspace"
 import { generateMarketItems, generateAnnouncements, generateLeaderboard, generateWeeklyReport } from "@/data/server"
 import { calculateAirshipStats, calculateCombatPower } from "@/engine/statsCalc"
 import { runFullBattle, createInitialBattleState } from "@/engine/battleSim"
 import { generateEvent } from "@/engine/eventGen"
+import { findPath, estimateRoute, buildRouteNodes, getAdjacentAirspaces, hexDistance } from "@/engine/routePlanner"
 
 interface GameState {
   player: {
@@ -33,6 +39,19 @@ interface GameState {
   isStormSeason: boolean
   todayWeather: string
   currentExplorationAirspaceId: string | null
+  currentRoute: FlightRoute | null
+  routeProgress: RouteProgress | null
+  guildSeason: GuildSeasonState
+  playerListings: SellRecord[]
+  priceHistory: PriceHistoryEntry[]
+  completedRoutes: Array<{
+    route: FlightRoute
+    gatheredResources: Record<string, number>
+    discoveries: string[]
+    sailWear: number
+    engineWear: number
+    completedAt: number
+  }>
 
   buildAirship: (name: string, type: AirshipType, keel: AirshipComponent, engine: AirshipComponent, sail: AirshipComponent, special: AirshipComponent | null) => void
   recruitCrew: (crewId: string) => void
@@ -41,8 +60,13 @@ interface GameState {
   startExploration: (airshipId: string, airspaceId: string) => void
   triggerEvent: (airshipId: string) => void
   resolveEvent: (airshipId: string, choiceIndex: number) => void
+  planRoute: (airshipId: string, startId: string, endId: string) => FlightRoute | null
+  launchRoute: (route: FlightRoute) => void
+  advanceRouteNode: () => void
+  completeRoute: () => void
   startBattle: (attackerAirshipId: string, defenderAirshipId: string, airspaceId: string) => void
   advanceBattleRound: () => void
+  launchGuildWar: (airshipId: string, airspaceId: string, action: "attack" | "defend") => void
   upgradeOutpost: (outpostId: string, resourceType: string, amount: number) => void
   buyMarketItem: (itemId: string) => void
   listMarketItem: (item: TradeItem) => void
@@ -69,6 +93,19 @@ function createInitialAirship(): Airship {
     sailIntegrity: 100,
     enginePower: 100,
   }
+}
+
+function createGuildSeason(airspaces: Airspace[]): GuildSeasonState {
+  const guildScores: GuildSeasonState["guildScores"] = {}
+  for (const name of GUILD_NAMES) {
+    guildScores[name] = {
+      points: Math.floor(Math.random() * 500) + 100,
+      wins: Math.floor(Math.random() * 10),
+      losses: Math.floor(Math.random() * 8),
+      controlledAirspaces: airspaces.filter(a => a.owner === name).length,
+    }
+  }
+  return { weekNumber: 42, guildScores, warRecords: [] }
 }
 
 export const useGameStore = create<GameState>()(
@@ -100,6 +137,12 @@ export const useGameStore = create<GameState>()(
       isStormSeason: false,
       todayWeather: "多云转风",
       currentExplorationAirspaceId: null,
+      currentRoute: null,
+      routeProgress: null,
+      guildSeason: createGuildSeason(INITIAL_AIRSPACES),
+      playerListings: [],
+      priceHistory: [],
+      completedRoutes: [],
 
       buildAirship: (name, type, keel, engine, sail, special) => {
         const stats = calculateAirshipStats(type, keel, engine, sail, special)
@@ -187,11 +230,29 @@ export const useGameStore = create<GameState>()(
           }
         }
 
+        let adjacentDiscovered = false
         const newAirspaces = state.airspaces.map(a => {
-          if (a.id !== targetAirspaceId) return a
-          if (isDiscoveryEvent && !a.discovered) return { ...a, discovered: true }
+          if (a.id === targetAirspaceId && isDiscoveryEvent && !a.discovered) {
+            return { ...a, discovered: true }
+          }
           return a
         })
+
+        if (isDiscoveryEvent && isGatherChoice && targetAirspaceId) {
+          const targetAirspace = state.airspaces.find(a => a.id === targetAirspaceId)
+          if (targetAirspace) {
+            const adjacentUndiscovered = getAdjacentAirspaces(newAirspaces, targetAirspace.hexQ, targetAirspace.hexR)
+              .filter(a => !a.discovered)
+            if (adjacentUndiscovered.length > 0) {
+              const toDiscover = adjacentUndiscovered[0]
+              const idx = newAirspaces.findIndex(a => a.id === toDiscover.id)
+              if (idx >= 0) {
+                newAirspaces[idx] = { ...newAirspaces[idx], discovered: true }
+                adjacentDiscovered = true
+              }
+            }
+          }
+        }
 
         set(state => ({
           player: {
@@ -213,6 +274,154 @@ export const useGameStore = create<GameState>()(
           },
           airspaces: newAirspaces,
           currentEvent: null,
+          announcements: adjacentDiscovered
+            ? [{ id: `ann_${Date.now()}_disc`, type: "discovery" as const, message: `【发现】探索航线新发现：相邻未知空域已点亮！`, timestamp: Date.now() }, ...state.announcements]
+            : state.announcements,
+        }))
+      },
+
+      planRoute: (airshipId, startId, endId) => {
+        const state = get()
+        const airship = state.player.airships.find(a => a.id === airshipId)
+        if (!airship) return null
+        const pathAirspaces = findPath(state.airspaces, startId, endId)
+        if (pathAirspaces.length === 0) return null
+        const nodes = buildRouteNodes(pathAirspaces)
+        const est = estimateRoute(nodes, airship.stats.range, airship.stats.capacity)
+        const route: FlightRoute = {
+          id: `route_${Date.now()}`,
+          airshipId,
+          airshipName: airship.name,
+          nodes,
+          estimatedDistance: est.distance,
+          estimatedFuel: est.fuel,
+          estimatedDurability: est.durability,
+          estimatedRisk: est.risk,
+          estimatedResources: est.resources,
+          createdAt: Date.now(),
+        }
+        set({ currentRoute: route })
+        return route
+      },
+
+      launchRoute: (route) => {
+        const state = get()
+        set({
+          player: {
+            ...state.player,
+            airships: state.player.airships.map(a =>
+              a.id === route.airshipId ? { ...a, status: "exploring" as const } : a
+            ),
+          },
+          currentRoute: route,
+          routeProgress: {
+            route,
+            currentNodeIndex: 0,
+            gatheredResources: {},
+            discoveries: [],
+            sailWear: 0,
+            engineWear: 0,
+            fuelUsed: 0,
+            startedAt: Date.now(),
+            completedAt: null,
+          },
+          currentExplorationAirspaceId: route.nodes[0]?.airspaceId ?? null,
+        })
+      },
+
+      advanceRouteNode: () => {
+        const state = get()
+        const progress = state.routeProgress
+        if (!progress || progress.completedAt) return
+
+        const nextIdx = progress.currentNodeIndex + 1
+        const node = progress.route.nodes[nextIdx]
+        if (!node) return
+
+        const prevNode = progress.route.nodes[progress.currentNodeIndex]
+        const dist = hexDistance(prevNode.hexQ, prevNode.hexR, node.hexQ, node.hexR)
+
+        const newGathered = { ...progress.gatheredResources }
+        if (node.discovered) {
+          for (const res of node.resources) {
+            const amount = Math.round(res.amount * 0.5)
+            newGathered[res.type] = (newGathered[res.type] || 0) + amount
+          }
+        }
+
+        const newDiscoveries = [...progress.discoveries]
+        const newAirspaces = [...state.airspaces]
+        if (!node.discovered) {
+          const idx = newAirspaces.findIndex(a => a.id === node.airspaceId)
+          if (idx >= 0) {
+            newAirspaces[idx] = { ...newAirspaces[idx], discovered: true }
+            newDiscoveries.push(node.airspaceName)
+          }
+        }
+
+        const sailWear = progress.sailWear + dist * 2 + node.dangerLevel
+        const engineWear = progress.engineWear + dist * 1.5
+        const fuelUsed = progress.fuelUsed + dist * 8
+
+        const isLastNode = nextIdx >= progress.route.nodes.length - 1
+
+        set(state => ({
+          airspaces: newAirspaces,
+          routeProgress: {
+            ...progress,
+            currentNodeIndex: nextIdx,
+            gatheredResources: newGathered,
+            discoveries: newDiscoveries,
+            sailWear,
+            engineWear,
+            fuelUsed,
+            completedAt: isLastNode ? Date.now() : null,
+          },
+          currentExplorationAirspaceId: node.airspaceId,
+          player: {
+            ...state.player,
+            resources: { ...state.player.resources, ...Object.fromEntries(Object.entries(newGathered).map(([k, v]) => [k, (state.player.resources[k] || 0) + (v - (progress.gatheredResources[k] || 0))])) },
+          },
+        }))
+      },
+
+      completeRoute: () => {
+        const state = get()
+        const progress = state.routeProgress
+        if (!progress) return
+
+        const completedEntry = {
+          route: progress.route,
+          gatheredResources: progress.gatheredResources,
+          discoveries: progress.discoveries,
+          sailWear: progress.sailWear,
+          engineWear: progress.engineWear,
+          completedAt: Date.now(),
+        }
+
+        set(state => ({
+          player: {
+            ...state.player,
+            airships: state.player.airships.map(a =>
+              a.id === progress.route.airshipId
+                ? {
+                    ...a,
+                    status: "docked" as const,
+                    sailIntegrity: Math.max(0, a.sailIntegrity - progress.sailWear),
+                    enginePower: Math.max(0, a.enginePower - progress.engineWear),
+                  }
+                : a
+            ),
+          },
+          currentRoute: null,
+          routeProgress: null,
+          currentExplorationAirspaceId: null,
+          currentEvent: null,
+          completedRoutes: [completedEntry, ...state.completedRoutes],
+          announcements: [
+            { id: `ann_${Date.now()}_route`, type: "discovery" as const, message: `【返航】${progress.route.airshipName} 完成航线探索！发现 ${progress.discoveries.length} 个新空域`, timestamp: Date.now() },
+            ...state.announcements,
+          ],
         }))
       },
 
@@ -253,6 +462,91 @@ export const useGameStore = create<GameState>()(
           },
           announcements: [
             { id: `ann_${Date.now()}`, type: "battle" as const, message: `【争夺战】${report.result === "victory" ? "胜利" : "失败"}！${report.attacker} ${report.result === "victory" ? "击败" : "未能攻克"} 防守方于 ${airspace.name}`, timestamp: Date.now() },
+            ...state.announcements,
+          ],
+        }))
+      },
+
+      launchGuildWar: (airshipId, airspaceId, action) => {
+        const state = get()
+        const airship = state.player.airships.find(a => a.id === airshipId)
+        const airspace = state.airspaces.find(a => a.id === airspaceId)
+        if (!airship || !airspace || !state.player.guild) return
+
+        const attackingGuild = action === "attack" ? state.player.guild! : (airspace.owner || "无主")
+        const defendingGuild = action === "attack" ? (airspace.owner || "无主") : state.player.guild!
+        const attackerPower = calculateCombatPower(airship.stats)
+        const defenderPower = Math.round(attackerPower * (0.7 + Math.random() * 0.5))
+        const won = attackerPower * (0.8 + Math.random() * 0.4) > defenderPower
+
+        const result: "victory" | "defeat" | "draw" = won ? "victory" : (Math.random() > 0.3 ? "defeat" : "draw")
+        const warRecord: GuildWarRecord = {
+          id: `gw_${Date.now()}`,
+          attackingGuild,
+          defendingGuild,
+          airspaceId,
+          airspaceName: airspace.name,
+          action,
+          result,
+          timestamp: Date.now(),
+        }
+
+        const newAirspaces = state.airspaces.map(a => {
+          if (a.id !== airspaceId) return a
+          if (result === "victory" && action === "attack") {
+            const guildIdx = GUILD_NAMES.indexOf(state.player.guild!)
+            return { ...a, owner: state.player.guild!, ownerColor: guildIdx >= 0 ? GUILD_COLORS[guildIdx] : "#2A9D8F" }
+          }
+          return a
+        })
+
+        const newGuildScores = { ...state.guildSeason.guildScores }
+        for (const name of GUILD_NAMES) {
+          if (!newGuildScores[name]) {
+            newGuildScores[name] = { points: 0, wins: 0, losses: 0, controlledAirspaces: 0 }
+          }
+        }
+        if (result === "victory") {
+          const atk = newGuildScores[attackingGuild]
+          if (atk) { atk.wins++; atk.points += 50 }
+          const def = newGuildScores[defendingGuild]
+          if (def) { def.losses++ }
+        } else if (result === "defeat") {
+          const atk = newGuildScores[attackingGuild]
+          if (atk) { atk.losses++ }
+          const def = newGuildScores[defendingGuild]
+          if (def) { def.wins++; def.points += 30 }
+        } else {
+          const atk = newGuildScores[attackingGuild]
+          if (atk) { atk.points += 10 }
+          const def = newGuildScores[defendingGuild]
+          if (def) { def.points += 10 }
+        }
+
+        for (const name of GUILD_NAMES) {
+          if (newGuildScores[name]) {
+            newGuildScores[name].controlledAirspaces = newAirspaces.filter(a => a.owner === name).length
+          }
+        }
+
+        const goldReward = result === "victory" ? 800 : result === "draw" ? 200 : 100
+
+        set(state => ({
+          airspaces: newAirspaces,
+          guildSeason: {
+            ...state.guildSeason,
+            guildScores: newGuildScores,
+            warRecords: [warRecord, ...state.guildSeason.warRecords],
+          },
+          player: {
+            ...state.player,
+            gold: state.player.gold + goldReward,
+            airspaces: state.player.airships.map(a =>
+              a.id === airshipId ? { ...a, status: "docked" as const } : a
+            ),
+          },
+          announcements: [
+            { id: `ann_${Date.now()}_gw`, type: "battle" as const, message: `【公会战】${attackingGuild} ${result === "victory" ? "击败" : result === "defeat" ? "败于" : "战平"} ${defendingGuild} 于 ${airspace.name}`, timestamp: Date.now() },
             ...state.announcements,
           ],
         }))
@@ -300,21 +594,58 @@ export const useGameStore = create<GameState>()(
         const state = get()
         const item = state.marketItems.find(i => i.id === itemId)
         if (!item || state.player.gold < item.price) return
+
+        const isPlayerListing = state.playerListings.some(l => l.itemId === itemId)
+        let updatedListings = state.playerListings
+        let newPriceHistory = state.priceHistory
+        if (isPlayerListing) {
+          updatedListings = state.playerListings.map(l =>
+            l.itemId === itemId ? { ...l, status: "sold" as const, soldAt: Date.now() } : l
+          )
+          const listing = state.playerListings.find(l => l.itemId === itemId)
+          if (listing) {
+            newPriceHistory = [
+              ...state.priceHistory,
+              { rarity: listing.rarity, category: listing.category, price: listing.price, timestamp: Date.now() },
+            ]
+          }
+        }
+
         set(state => ({
-          player: { ...state.player, gold: state.player.gold - item.price },
+          player: {
+            ...state.player,
+            gold: isPlayerListing
+              ? state.player.gold + item.price
+              : state.player.gold - item.price,
+          },
           marketItems: state.marketItems.filter(i => i.id !== itemId),
+          playerListings: updatedListings,
+          priceHistory: newPriceHistory,
           isStormSeason: true,
           announcements: [
             { id: `ann_${Date.now()}_storm`, type: "storm" as const, message: `【暴风季】交易完成触发暴风季！今日飞行风险大幅提升！`, timestamp: Date.now() },
-            { id: `ann_${Date.now()}`, type: "trade" as const, message: `【交易】舰长 以 ${item.price} 金币购入 ${item.name}`, timestamp: Date.now() },
+            { id: `ann_${Date.now()}`, type: "trade" as const, message: `【交易】${isPlayerListing ? `${item.name} 已售出，获得 ${item.price} 金币` : `舰长 以 ${item.price} 金币购入 ${item.name}`}`, timestamp: Date.now() },
             ...state.announcements,
           ],
         }))
       },
 
       listMarketItem: (item) => {
+        const state = get()
+        const sellRecord: SellRecord = {
+          id: `sell_${Date.now()}`,
+          itemId: item.id,
+          itemName: item.name,
+          rarity: item.rarity,
+          category: item.type === "blueprint" ? "blueprint" : (item.componentId?.split("_")[0] || "keel"),
+          price: item.price,
+          status: "active",
+          listedAt: Date.now(),
+          soldAt: null,
+        }
         set(state => ({
           marketItems: [...state.marketItems, item],
+          playerListings: [...state.playerListings, sellRecord],
         }))
       },
 
@@ -335,6 +666,21 @@ export const useGameStore = create<GameState>()(
         set(state => ({ announcements: [ann, ...state.announcements] }))
       },
     }),
-    { name: "airship-game-storage" }
+    {
+      name: "airship-game-storage",
+      merge: (persisted, current) => {
+        const merged = { ...current, ...(persisted as Partial<GameState>) }
+        if (merged.airspaces && merged.guildSeason) {
+          const gs = { ...merged.guildSeason }
+          const scores = { ...gs.guildScores }
+          for (const name of Object.keys(scores)) {
+            scores[name] = { ...scores[name], controlledAirspaces: merged.airspaces.filter(a => a.owner === name).length }
+          }
+          gs.guildScores = scores
+          merged.guildSeason = gs
+        }
+        return merged
+      },
+    }
   )
 )

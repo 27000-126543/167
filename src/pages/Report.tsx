@@ -11,8 +11,9 @@ import {
   Line,
   ResponsiveContainer,
   Cell,
+  Legend,
 } from "recharts"
-import { BarChart3, Download, TrendingUp, Globe } from "lucide-react"
+import { BarChart3, Download, TrendingUp, Globe, Navigation } from "lucide-react"
 import { calculateCombatPower, getStatLabel } from "@/engine/statsCalc"
 import type { AirshipStats } from "@/types"
 import jsPDF from "jspdf"
@@ -73,9 +74,54 @@ function drawRadarOnPdf(doc: jsPDF, cx: number, cy: number, radius: number, labe
   }
 }
 
+function drawLineOnPdf(
+  doc: jsPDF,
+  data: Array<{ label: string; value: number }>,
+  x: number, y: number, w: number, h: number,
+  color: [number, number, number],
+  label: string
+) {
+  if (data.length === 0) return
+  const maxVal = Math.max(...data.map(d => d.value), 1)
+
+  doc.setDrawColor(60, 60, 80)
+  doc.setLineWidth(0.2)
+  for (let i = 0; i <= 4; i++) {
+    const ly = y + h - (h * i) / 4
+    doc.line(x, ly, x + w, ly)
+  }
+
+  doc.setDrawColor(...color)
+  doc.setLineWidth(0.6)
+  for (let i = 0; i < data.length - 1; i++) {
+    const x1 = x + (w * i) / (data.length - 1)
+    const x2 = x + (w * (i + 1)) / (data.length - 1)
+    const y1 = y + h - (data[i].value / maxVal) * h
+    const y2 = y + h - (data[i + 1].value / maxVal) * h
+    doc.line(x1, y1, x2, y2)
+  }
+
+  for (let i = 0; i < data.length; i++) {
+    const dx = x + (w * i) / (data.length - 1)
+    const dy = y + h - (data[i].value / maxVal) * h
+    doc.setFillColor(...color)
+    doc.circle(dx, dy, 1, "F")
+  }
+
+  doc.setFontSize(6)
+  doc.setTextColor(...color)
+  doc.text(label, x, y - 2)
+
+  doc.setTextColor(140, 140, 140)
+  for (let i = 0; i < data.length; i++) {
+    const dx = x + (w * i) / (data.length - 1)
+    doc.text(data[i].label, dx, y + h + 4, { align: "center" })
+  }
+}
+
 export default function Report() {
   const { weeklyReport, player } = useGameStore()
-  const { weekNumber, territoryHeatmap, attendanceCurve, tradeRevenue, topEvents } = weeklyReport
+  const { weekNumber, territoryHeatmap, attendanceCurve, tradeRevenue, routeTrend, topEvents } = weeklyReport
   const reportRef = useRef<HTMLDivElement>(null)
 
   function handleExport() {
@@ -134,6 +180,28 @@ export default function Report() {
       doc.text(`${item.revenue} gold`, 14 + barW + 58, y)
       y += 6
     }
+
+    if (y > 200) {
+      doc.addPage()
+      doc.setFillColor(11, 29, 58)
+      doc.rect(0, 0, pageW, doc.internal.pageSize.getHeight(), "F")
+      y = 20
+    }
+
+    y += 8
+    doc.setTextColor(212, 168, 67)
+    doc.setFontSize(12)
+    doc.text("Route Exploration Trend", 14, y)
+    y += 6
+
+    const exploredData = routeTrend.map(r => ({ label: r.day, value: r.explored }))
+    const discoveredData = routeTrend.map(r => ({ label: r.day, value: r.discovered }))
+    const fuelData = routeTrend.map(r => ({ label: r.day, value: r.fuelCost }))
+
+    drawLineOnPdf(doc, exploredData, 14, y + 4, 55, 30, [34, 197, 94], "Explored")
+    drawLineOnPdf(doc, discoveredData, 77, y + 4, 55, 30, [59, 130, 246], "Discovered")
+    drawLineOnPdf(doc, fuelData, 140, y + 4, 55, 30, [245, 158, 11], "Fuel Cost")
+    y += 42
 
     y += 5
     doc.setTextColor(200, 200, 200)
@@ -251,15 +319,35 @@ export default function Report() {
             backgroundColor: "#1a1a2e",
           }}
         >
+          <SectionTitle icon={Navigation}>航线探索趋势</SectionTitle>
+          <ResponsiveContainer width="100%" height={260}>
+            <LineChart data={routeTrend}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#2d2d44" />
+              <XAxis dataKey="day" tick={{ fill: "#9ca3af", fontSize: 12 }} />
+              <YAxis tick={{ fill: "#9ca3af", fontSize: 12 }} />
+              <Tooltip
+                contentStyle={{ backgroundColor: "#0f0f1a", border: "1px solid #2d2d44", borderRadius: 6, color: "#e0e0e0" }}
+                labelStyle={{ color: "#e0e0e0" }}
+              />
+              <Legend wrapperStyle={{ color: "#9ca3af", fontSize: 12 }} />
+              <Line type="monotone" dataKey="explored" name="探索次数" stroke="#22c55e" strokeWidth={2} dot={{ fill: "#22c55e", r: 3 }} />
+              <Line type="monotone" dataKey="discovered" name="新发现" stroke="#3b82f6" strokeWidth={2} dot={{ fill: "#3b82f6", r: 3 }} />
+              <Line type="monotone" dataKey="fuelCost" name="燃料消耗" stroke="#f59e0b" strokeWidth={2} dot={{ fill: "#f59e0b", r: 3 }} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+
+        <div
+          style={{
+            border: "1px solid #2d2d44",
+            borderRadius: 8,
+            padding: 20,
+            backgroundColor: "#1a1a2e",
+          }}
+        >
           <SectionTitle icon={TrendingUp}>活跃度曲线</SectionTitle>
           <ResponsiveContainer width="100%" height={260}>
             <LineChart data={attendanceCurve}>
-              <defs>
-                <linearGradient id="attendanceGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                </linearGradient>
-              </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#2d2d44" />
               <XAxis dataKey="date" tick={{ fill: "#9ca3af", fontSize: 12 }} />
               <YAxis tick={{ fill: "#9ca3af", fontSize: 12 }} />

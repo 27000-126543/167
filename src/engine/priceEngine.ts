@@ -1,4 +1,4 @@
-import type { TradeItem, Rarity } from "@/types"
+import type { PriceHistoryEntry, Rarity } from "@/types"
 
 const RARITY_BASE_PRICES: Record<Rarity, { min: number; max: number; avg: number }> = {
   common: { min: 200, max: 500, avg: 350 },
@@ -15,17 +15,37 @@ const CATEGORY_MULTIPLIER: Record<string, number> = {
   blueprint: 1.5,
 }
 
-export function calculateSuggestedPrice(avgPrice7d: number, rarity: string, category?: string): { min: number; max: number } {
-  const rarityKey = rarity as Rarity
-  const basePrices = RARITY_BASE_PRICES[rarityKey] || RARITY_BASE_PRICES.rare
-
-  let effectiveAvg = avgPrice7d
-  if (!effectiveAvg || effectiveAvg <= 0) {
-    effectiveAvg = basePrices.avg
+function computeMarketAvg(
+  priceHistory: PriceHistoryEntry[],
+  rarity: Rarity,
+  category?: string
+): number {
+  const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
+  let filtered = priceHistory.filter(
+    (e) => e.rarity === rarity && e.timestamp >= sevenDaysAgo
+  )
+  if (category) {
+    const byCategory = filtered.filter((e) => e.category === category)
+    if (byCategory.length > 0) filtered = byCategory
   }
+  if (filtered.length === 0) {
+    const basePrices = RARITY_BASE_PRICES[rarity] || RARITY_BASE_PRICES.rare
+    const catMultiplier = category ? (CATEGORY_MULTIPLIER[category] || 1.0) : 1.0
+    return Math.round(basePrices.avg * catMultiplier)
+  }
+  const sorted = [...filtered].sort((a, b) => b.timestamp - a.timestamp)
+  const recent = sorted.slice(0, 7)
+  const sum = recent.reduce((s, e) => s + e.price, 0)
+  return Math.round(sum / recent.length)
+}
 
-  const catMultiplier = category ? (CATEGORY_MULTIPLIER[category] || 1.0) : 1.0
-  effectiveAvg = Math.round(effectiveAvg * catMultiplier)
+export function calculateSuggestedPrice(
+  priceHistory: PriceHistoryEntry[],
+  rarity: string,
+  category?: string
+): { min: number; max: number } {
+  const rarityKey = rarity as Rarity
+  const effectiveAvg = computeMarketAvg(priceHistory, rarityKey, category)
 
   const rarityMultiplier: Record<string, number> = {
     common: 0.15,
@@ -40,11 +60,12 @@ export function calculateSuggestedPrice(avgPrice7d: number, rarity: string, cate
   }
 }
 
-export function getAvgPrice7d(rarity: string, category?: string): number {
-  const rarityKey = rarity as Rarity
-  const basePrices = RARITY_BASE_PRICES[rarityKey] || RARITY_BASE_PRICES.rare
-  const catMultiplier = category ? (CATEGORY_MULTIPLIER[category] || 1.0) : 1.0
-  return Math.round(basePrices.avg * catMultiplier)
+export function getAvgPrice7d(
+  priceHistory: PriceHistoryEntry[],
+  rarity: string,
+  category?: string
+): number {
+  return computeMarketAvg(priceHistory, rarity as Rarity, category)
 }
 
 export function isPriceInRange(price: number, suggestedMin: number, suggestedMax: number): "low" | "fair" | "high" {

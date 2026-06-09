@@ -108,11 +108,19 @@ export function generateWeeklyReport(): WeeklyReport {
     { route: "碧波→金耀航线", revenue: Math.floor(Math.random() * 2500) + 600 },
   ]
 
+  const routeTrend = Array.from({ length: 7 }, (_, i) => ({
+    day: `第${i + 1}天`,
+    explored: Math.floor(Math.random() * 15) + 5,
+    discovered: Math.floor(Math.random() * 6) + 1,
+    fuelCost: Math.floor(Math.random() * 200) + 50,
+  }))
+
   return {
     weekNumber: 42,
     territoryHeatmap: heatMap,
     attendanceCurve,
     tradeRevenue,
+    routeTrend,
     topEvents: ["天际联盟占领翡翠港湾", "暴风季持续3天", "苍穹海盗团发现远古遗迹", "全服贸易额突破10万金币"],
   }
 }
