@@ -1,9 +1,9 @@
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { useGameStore } from "@/store/gameStore"
 import { WEATHER_LABELS, RESOURCE_LABELS } from "@/types"
 import type { Airspace } from "@/types"
 import GaugeChart from "@/components/GaugeChart"
-import { MapPin, Cloud, Wind, Mountain, Compass } from "lucide-react"
+import { MapPin, Cloud, Wind, Mountain, Compass, Wrench, Trash2, Bookmark } from "lucide-react"
 
 const TERRAIN_NAMES: Record<Airspace["terrain"], string> = {
   island: "浮空岛",
@@ -151,10 +151,16 @@ export default function Explore() {
   const currentRoute = useGameStore((s) => s.currentRoute)
   const routeProgress = useGameStore((s) => s.routeProgress)
   const completedRoutes = useGameStore((s) => s.completedRoutes)
+  const clearCurrentRouteAction = useGameStore((s) => s.clearCurrentRoute)
+  const saveRouteAction = useGameStore((s) => s.saveRoute)
+  const deleteSavedRouteAction = useGameStore((s) => s.deleteSavedRoute)
+  const savedRoutes = useGameStore((s) => s.savedRoutes)
+  const repairAirshipAction = useGameStore((s) => s.repairAirship)
 
   const [selectedAirshipId, setSelectedAirshipId] = useState("")
   const [startAirspaceId, setStartAirspaceId] = useState("")
   const [endAirspaceId, setEndAirspaceId] = useState("")
+  const [routeName, setRouteName] = useState("")
 
   const dockedAirships = player.airships.filter((a) => a.status === "docked")
   const discoveredAirspaces = airspaces.filter((a) => a.discovered)
@@ -162,6 +168,14 @@ export default function Explore() {
   const isInFlight = routeProgress !== null && routeProgress.completedAt === null
   const isRouteComplete = routeProgress !== null && routeProgress.completedAt !== null
   const isPlanning = !isInFlight && !isRouteComplete
+
+  useEffect(() => {
+    if (startAirspaceId && endAirspaceId && startAirspaceId === endAirspaceId) {
+      clearCurrentRouteAction()
+    } else if (startAirspaceId || endAirspaceId) {
+      clearCurrentRouteAction()
+    }
+  }, [startAirspaceId, endAirspaceId])
 
   const routeAirspaceIds = useMemo(() => {
     if (!currentRoute) return new Set<string>()
@@ -195,7 +209,29 @@ export default function Explore() {
     launchRouteAction(currentRoute)
   }
 
+  function handleSaveRoute() {
+    if (!currentRoute || currentRoute.nodes.length <= 1) return
+    const name = routeName.trim() || `航线 ${savedRoutes.length + 1}`
+    const firstNode = currentRoute.nodes[0]
+    const lastNode = currentRoute.nodes[currentRoute.nodes.length - 1]
+    saveRouteAction(name, firstNode.airspaceId, firstNode.airspaceName, lastNode.airspaceId, lastNode.airspaceName)
+    setRouteName("")
+  }
+
+  function handleQuickPlan(sr: typeof savedRoutes[number]) {
+    const airship = dockedAirships[0]
+    if (!airship) return
+    setSelectedAirshipId(airship.id)
+    setStartAirspaceId(sr.startId)
+    setEndAirspaceId(sr.endId)
+    planRouteAction(airship.id, sr.startId, sr.endId)
+  }
+
   const flyingAirship = routeProgress
+    ? player.airships.find((a) => a.id === routeProgress.route.airshipId)
+    : null
+
+  const completedAirship = isRouteComplete && routeProgress
     ? player.airships.find((a) => a.id === routeProgress.route.airshipId)
     : null
 
@@ -367,16 +403,84 @@ export default function Explore() {
                 {currentRoute.nodes.length <= 1 && (
                   <div className="text-xs text-red-400 mt-1">起点与目标相同，无法规划有效航线</div>
                 )}
-                <button
-                  onClick={handleLaunchRoute}
-                  disabled={currentRoute.nodes.length <= 1}
-                  className="btn-gold flex items-center justify-center gap-1.5 self-end mt-1 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  <MapPin className="w-4 h-4" />
-                  起飞出发
-                </button>
+                <div className="flex items-center gap-2 self-end mt-1">
+                  <input
+                    type="text"
+                    value={routeName}
+                    onChange={(e) => setRouteName(e.target.value)}
+                    placeholder="航线名称（可选）"
+                    className="bg-navy-700 border border-navy-600/50 rounded px-2 py-1 text-xs text-gray-200 outline-none focus:border-gold-500/40 w-36"
+                  />
+                  <button
+                    onClick={handleSaveRoute}
+                    disabled={currentRoute.nodes.length <= 1}
+                    className="btn-outline flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed text-xs px-2.5 py-1"
+                  >
+                    <Bookmark className="w-3 h-3" />
+                    保存当前航线
+                  </button>
+                  <button
+                    onClick={handleLaunchRoute}
+                    disabled={currentRoute.nodes.length <= 1}
+                    className="btn-gold flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <MapPin className="w-4 h-4" />
+                    起飞出发
+                  </button>
+                </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {isPlanning && savedRoutes.length > 0 && (
+        <div className="card-metal p-4 rounded-lg">
+          <h2 className="text-sm font-medium text-gold-400 flex items-center gap-2 mb-3">
+            <Bookmark className="w-4 h-4" />
+            常用航线
+          </h2>
+          <div className="flex flex-col gap-3">
+            {savedRoutes.map((sr) => (
+              <div key={sr.id} className="p-3 rounded-lg bg-navy-900/40 border border-navy-600/20">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-medium text-gold-400">{sr.name}</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => handleQuickPlan(sr)}
+                      disabled={dockedAirships.length === 0}
+                      className="btn-outline flex items-center gap-1 text-[10px] px-2 py-0.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <Compass className="w-3 h-3" />
+                      一键规划
+                    </button>
+                    <button
+                      onClick={() => deleteSavedRouteAction(sr.id)}
+                      className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      删除
+                    </button>
+                  </div>
+                </div>
+                <div className="text-xs text-gray-300 mb-1">
+                  {sr.startName} <span className="text-gold-500">→</span> {sr.endName}
+                </div>
+                {sr.lastResult && (
+                  <div className="mt-2 p-2 rounded bg-navy-900/60">
+                    <span className="text-[10px] text-gray-500">上次结果：</span>
+                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-gray-400 mt-1">
+                      <span>
+                        采集: {Object.entries(sr.lastResult.gatheredResources).map(([t, a]) => `${RESOURCE_LABELS[t as keyof typeof RESOURCE_LABELS] ?? t} x${a}`).join(", ") || "无"}
+                      </span>
+                      <span>发现: {sr.lastResult.discoveries.length > 0 ? sr.lastResult.discoveries.join(", ") : "无"}</span>
+                      <span>帆磨损: -{sr.lastResult.sailWear.toFixed(1)}%</span>
+                      <span>引擎磨损: -{sr.lastResult.engineWear.toFixed(1)}%</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -582,6 +686,54 @@ export default function Explore() {
                 </div>
               </div>
             </div>
+
+            {completedAirship && (() => {
+              const sail = completedAirship.sailIntegrity
+              const engine = completedAirship.enginePower
+              const needsRepair = sail < 100 || engine < 100
+              const goldCost = (100 - sail) * 3 + (100 - engine) * 3
+              const fabricCost = Math.ceil((100 - sail) / 5)
+              const ironwoodCost = Math.ceil((100 - engine) / 5)
+              const canAfford = player.gold >= goldCost
+                && (player.resources.fabric || 0) >= fabricCost
+                && (player.resources.ironwood || 0) >= ironwoodCost
+
+              return needsRepair ? (
+                <div className="p-3 rounded-lg border border-gold-500/20 bg-navy-800/50">
+                  <h3 className="text-sm font-medium text-gold-400 flex items-center gap-2 mb-3">
+                    <Wrench className="w-4 h-4" />
+                    维修飞艇
+                  </h3>
+                  <div className="flex flex-wrap gap-4 text-xs mb-3">
+                    <div className="flex flex-col items-center gap-1 p-2 rounded bg-navy-900/60 min-w-[80px]">
+                      <span className="text-gray-400">帆完整度</span>
+                      <span className={sail < 50 ? "text-red-400 font-medium" : "text-yellow-400 font-medium"}>{sail.toFixed(1)}%</span>
+                    </div>
+                    <div className="flex flex-col items-center gap-1 p-2 rounded bg-navy-900/60 min-w-[80px]">
+                      <span className="text-gray-400">引擎功率</span>
+                      <span className={engine < 50 ? "text-red-400 font-medium" : "text-yellow-400 font-medium"}>{engine.toFixed(1)}%</span>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-3 text-xs mb-3">
+                    <span className="text-gray-400">维修费用：</span>
+                    <span className={player.gold >= goldCost ? "text-gold-400" : "text-red-400"}>{goldCost} 金币</span>
+                    <span className={(player.resources.fabric || 0) >= fabricCost ? "text-blue-300" : "text-red-400"}>{fabricCost} 帆布</span>
+                    <span className={(player.resources.ironwood || 0) >= ironwoodCost ? "text-orange-300" : "text-red-400"}>{ironwoodCost} 铁木</span>
+                  </div>
+                  {!canAfford && (
+                    <div className="text-xs text-red-400 mb-2">资源不足，无法维修</div>
+                  )}
+                  <button
+                    onClick={() => repairAirshipAction(completedAirship.id, 100, 100)}
+                    disabled={!canAfford}
+                    className="btn-outline flex items-center gap-1.5 text-xs disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <Wrench className="w-3 h-3" />
+                    维修
+                  </button>
+                </div>
+              ) : null
+            })()}
 
             <button
               onClick={() => completeRouteAction()}

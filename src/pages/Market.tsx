@@ -2,9 +2,10 @@ import { useState } from "react"
 import { useGameStore } from "@/store/gameStore"
 import { RARITY_LABELS, RARITY_COLORS } from "@/types"
 import type { TradeItem, TradeItemType, Rarity } from "@/types"
-import { isPriceInRange, calculateSuggestedPrice, getAvgPrice7d, generateTradeId } from "@/engine/priceEngine"
+import { isPriceInRange, calculateSuggestedPrice, getAvgPrice7d, generateTradeId, calculateTransactionFee } from "@/engine/priceEngine"
 import { ShoppingBag, Tag, TrendingUp, DollarSign, Search, Filter } from "lucide-react"
 import { LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer } from "recharts"
+import type { PriceHistoryEntry } from "@/types"
 
 function PriceBadge({ price, suggestedMin, suggestedMax }: { price: number; suggestedMin: number; suggestedMax: number }) {
   const range = isPriceInRange(price, suggestedMin, suggestedMax)
@@ -27,8 +28,27 @@ function PriceBadge({ price, suggestedMin, suggestedMax }: { price: number; sugg
   )
 }
 
-function MarketCard({ item, onBuy, playerGold }: { item: TradeItem; onBuy: () => void; playerGold: number }) {
+function MarketCard({
+  item,
+  onBuy,
+  playerGold,
+  priceHistory,
+}: {
+  item: TradeItem
+  onBuy: () => void
+  playerGold: number
+  priceHistory: PriceHistoryEntry[]
+}) {
   const canAfford = playerGold >= item.price
+  const category = item.type === "blueprint" ? "blueprint" : (item.componentId?.split("_")[0] || "blueprint")
+  const suggested = calculateSuggestedPrice(priceHistory, item.rarity, category)
+  const avgPrice = getAvgPrice7d(priceHistory, item.rarity, category)
+
+  const recentSales = priceHistory
+    .filter((e) => e.rarity === item.rarity && e.category === category)
+    .sort((a, b) => b.timestamp - a.timestamp)
+    .slice(0, 3)
+
   return (
     <div
       style={{
@@ -64,15 +84,25 @@ function MarketCard({ item, onBuy, playerGold }: { item: TradeItem; onBuy: () =>
       <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
         <DollarSign size={14} style={{ color: "#fbbf24" }} />
         <span style={{ color: "#fbbf24", fontWeight: 700 }}>{item.price} 金币</span>
-        <PriceBadge price={item.price} suggestedMin={item.suggestedMin} suggestedMax={item.suggestedMax} />
+        <PriceBadge price={item.price} suggestedMin={suggested.min} suggestedMax={suggested.max} />
       </div>
       <div style={{ fontSize: 11, color: "#6b7280" }}>
-        建议价格：{item.suggestedMin} - {item.suggestedMax} 金币
+        建议价格：{suggested.min} - {suggested.max} 金币
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
         <TrendingUp size={14} style={{ color: "#60a5fa" }} />
-        <span style={{ color: "#60a5fa" }}>7日均价：{item.avgPrice7d} 金币</span>
+        <span style={{ color: "#60a5fa" }}>7日均价：{avgPrice} 金币</span>
       </div>
+      {recentSales.length > 0 && (
+        <div style={{ fontSize: 11, color: "#6b7280", borderTop: "1px solid #2d2d44", paddingTop: 6 }}>
+          最近成交参考：
+          {recentSales.map((e, i) => (
+            <span key={i} style={{ marginLeft: 6, color: "#9ca3af" }}>
+              {e.price}金
+            </span>
+          ))}
+        </div>
+      )}
       <div style={{ fontSize: 12, color: "#6b7280" }}>卖家：{item.seller}</div>
       <button
         onClick={onBuy}
@@ -250,7 +280,9 @@ const STATUS_STYLES: Record<string, { color: string; bg: string; label: string }
 }
 
 function MyListings() {
-  const { playerListings, priceHistory } = useGameStore()
+  const { playerListings, priceHistory, cancelListing, repriceListing } = useGameStore()
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editPrice, setEditPrice] = useState("")
 
   if (playerListings.length === 0) {
     return (
@@ -293,6 +325,8 @@ function MyListings() {
         {playerListings.map((listing) => {
           const statusStyle = STATUS_STYLES[listing.status] || STATUS_STYLES.cancelled
           const suggested = calculateSuggestedPrice(priceHistory, listing.rarity, listing.category)
+          const fee = listing.status === "sold" ? calculateTransactionFee(listing.price) : 0
+
           return (
             <div
               key={listing.id}
@@ -347,10 +381,111 @@ function MyListings() {
                   建议价格：{suggested.min} - {suggested.max} 金币
                 </div>
               )}
-              {listing.status === "sold" && listing.soldAt && (
-                <div style={{ fontSize: 10, color: "#6b7280" }}>
-                  售出时间：{new Date(listing.soldAt).toLocaleString()}
+              {listing.status === "active" && (
+                <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
+                  <button
+                    onClick={() => cancelListing(listing.id)}
+                    style={{
+                      padding: "3px 10px",
+                      borderRadius: 4,
+                      border: "1px solid #EF4444",
+                      backgroundColor: "transparent",
+                      color: "#EF4444",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    撤单
+                  </button>
+                  {editingId === listing.id ? (
+                    <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                      <input
+                        type="number"
+                        value={editPrice}
+                        onChange={(e) => setEditPrice(e.target.value)}
+                        style={{
+                          width: 70,
+                          padding: "2px 6px",
+                          borderRadius: 4,
+                          border: "1px solid #2d2d44",
+                          backgroundColor: "#0f0f1a",
+                          color: "#e0e0e0",
+                          fontSize: 11,
+                        }}
+                      />
+                      <button
+                        onClick={() => {
+                          const newPrice = parseInt(editPrice)
+                          if (newPrice > 0) {
+                            repriceListing(listing.id, newPrice)
+                            setEditingId(null)
+                            setEditPrice("")
+                          }
+                        }}
+                        style={{
+                          padding: "2px 8px",
+                          borderRadius: 4,
+                          border: "none",
+                          backgroundColor: "#3b82f6",
+                          color: "#fff",
+                          fontSize: 11,
+                          fontWeight: 600,
+                          cursor: "pointer",
+                        }}
+                      >
+                        确认
+                      </button>
+                      <button
+                        onClick={() => {
+                          setEditingId(null)
+                          setEditPrice("")
+                        }}
+                        style={{
+                          padding: "2px 8px",
+                          borderRadius: 4,
+                          border: "1px solid #6b7280",
+                          backgroundColor: "transparent",
+                          color: "#6b7280",
+                          fontSize: 11,
+                          cursor: "pointer",
+                        }}
+                      >
+                        取消
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        setEditingId(listing.id)
+                        setEditPrice(String(listing.price))
+                      }}
+                      style={{
+                        padding: "3px 10px",
+                        borderRadius: 4,
+                        border: "1px solid #3b82f6",
+                        backgroundColor: "transparent",
+                        color: "#3b82f6",
+                        fontSize: 11,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                      }}
+                    >
+                      改价
+                    </button>
+                  )}
                 </div>
+              )}
+              {listing.status === "sold" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 10, color: "#6b7280" }}>
+                  <span>成交价：{listing.price} 金币</span>
+                  {listing.soldAt && <span>成交时间：{new Date(listing.soldAt).toLocaleString()}</span>}
+                  <span>手续费（5%）：{fee} 金币</span>
+                  <span style={{ color: "#22C55E" }}>实得：{listing.price - fee} 金币</span>
+                </div>
+              )}
+              {listing.status === "cancelled" && (
+                <div style={{ fontSize: 10, color: "#6b7280" }}>已取消</div>
               )}
             </div>
           )
@@ -367,14 +502,54 @@ const RARITY_LINE_COLORS: Record<Rarity, string> = {
   legendary: "#F59E0B",
 }
 
+const RARITY_FILTER_OPTIONS: Array<{ value: Rarity | "all"; label: string }> = [
+  { value: "all", label: "全部" },
+  { value: "common", label: "普通" },
+  { value: "rare", label: "稀有" },
+  { value: "epic", label: "史诗" },
+  { value: "legendary", label: "传说" },
+]
+
+const CATEGORY_FILTER_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "all", label: "全部" },
+  { value: "keel", label: "龙骨" },
+  { value: "engine", label: "引擎" },
+  { value: "sail", label: "帆翼" },
+  { value: "special", label: "特殊装置" },
+  { value: "blueprint", label: "图纸" },
+]
+
+const DROPDOWN_STYLE: React.CSSProperties = {
+  padding: "5px 8px",
+  borderRadius: 4,
+  border: "1px solid #2d2d44",
+  backgroundColor: "#0f0f1a",
+  color: "#e0e0e0",
+  fontSize: 12,
+}
+
 function PriceTrendChart() {
   const { priceHistory } = useGameStore()
+  const [rarityFilter, setRarityFilter] = useState<Rarity | "all">("all")
+  const [categoryFilter, setCategoryFilter] = useState<string>("all")
 
   const rarities: Rarity[] = ["common", "rare", "epic", "legendary"]
 
+  let filteredHistory = priceHistory
+  if (rarityFilter !== "all") {
+    filteredHistory = filteredHistory.filter((e) => e.rarity === rarityFilter)
+  }
+  if (categoryFilter !== "all") {
+    filteredHistory = filteredHistory.filter((e) => e.category === categoryFilter)
+  }
+
+  const isSingleLine = rarityFilter !== "all"
+
+  const activeRarities = isSingleLine ? [rarityFilter as Rarity] : rarities.filter((r) => filteredHistory.some((e) => e.rarity === r))
+
   const groupedByRarity: Record<string, { index: number; price: number; timestamp: number }[]> = {}
-  for (const rarity of rarities) {
-    const entries = priceHistory
+  for (const rarity of activeRarities) {
+    const entries = filteredHistory
       .filter((e) => e.rarity === rarity)
       .slice(-7)
       .map((e, i) => ({ index: i + 1, price: e.price, timestamp: e.timestamp }))
@@ -383,9 +558,12 @@ function PriceTrendChart() {
     }
   }
 
-  const activeRarities = rarities.filter((r) => groupedByRarity[r])
+  const chartActiveRarities = activeRarities.filter((r) => groupedByRarity[r])
 
-  if (activeRarities.length === 0) {
+  const avgForFilter = getAvgPrice7d(filteredHistory, rarityFilter === "all" ? "rare" : rarityFilter, categoryFilter === "all" ? undefined : categoryFilter)
+  const suggestedForFilter = calculateSuggestedPrice(filteredHistory, rarityFilter === "all" ? "rare" : rarityFilter, categoryFilter === "all" ? undefined : categoryFilter)
+
+  if (filteredHistory.length === 0) {
     return (
       <div
         style={{
@@ -399,6 +577,18 @@ function PriceTrendChart() {
           <TrendingUp size={18} />
           价格走势
         </div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+          <select value={rarityFilter} onChange={(e) => setRarityFilter(e.target.value as Rarity | "all")} style={DROPDOWN_STYLE}>
+            {RARITY_FILTER_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} style={DROPDOWN_STYLE}>
+            {CATEGORY_FILTER_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </div>
         <div style={{ color: "#6b7280", fontSize: 13, textAlign: "center", padding: "20px 0" }}>
           暂无价格历史数据
         </div>
@@ -406,11 +596,11 @@ function PriceTrendChart() {
     )
   }
 
-  const maxLen = Math.max(...activeRarities.map((r) => groupedByRarity[r].length))
+  const maxLen = Math.max(...chartActiveRarities.map((r) => groupedByRarity[r].length), 1)
   const chartData: Record<string, number | string>[] = []
   for (let i = 0; i < maxLen; i++) {
     const point: Record<string, number | string> = { index: i + 1 }
-    for (const rarity of activeRarities) {
+    for (const rarity of chartActiveRarities) {
       const entries = groupedByRarity[rarity]
       if (i < entries.length) {
         point[rarity] = entries[i].price
@@ -418,6 +608,8 @@ function PriceTrendChart() {
     }
     chartData.push(point)
   }
+
+  const filterLabel = rarityFilter === "all" ? "全部稀有度" : RARITY_LABELS[rarityFilter as Rarity]
 
   return (
     <div
@@ -432,22 +624,58 @@ function PriceTrendChart() {
         <TrendingUp size={18} />
         价格走势
       </div>
-      <div style={{ display: "flex", gap: 12, marginBottom: 10 }}>
-        {activeRarities.map((rarity) => (
-          <div key={rarity} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            <span
-              style={{
-                display: "inline-block",
-                width: 10,
-                height: 3,
-                borderRadius: 2,
-                backgroundColor: RARITY_LINE_COLORS[rarity],
-              }}
-            />
-            <span style={{ fontSize: 11, color: RARITY_LINE_COLORS[rarity] }}>{RARITY_LABELS[rarity]}</span>
-          </div>
-        ))}
+      <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <span style={{ fontSize: 11, color: "#9ca3af" }}>稀有度</span>
+          <select value={rarityFilter} onChange={(e) => setRarityFilter(e.target.value as Rarity | "all")} style={DROPDOWN_STYLE}>
+            {RARITY_FILTER_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <span style={{ fontSize: 11, color: "#9ca3af" }}>部件类型</span>
+          <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} style={DROPDOWN_STYLE}>
+            {CATEGORY_FILTER_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </div>
       </div>
+      {!isSingleLine && (
+        <div style={{ display: "flex", gap: 12, marginBottom: 10 }}>
+          {chartActiveRarities.map((rarity) => (
+            <div key={rarity} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <span
+                style={{
+                  display: "inline-block",
+                  width: 10,
+                  height: 3,
+                  borderRadius: 2,
+                  backgroundColor: RARITY_LINE_COLORS[rarity],
+                }}
+              />
+              <span style={{ fontSize: 11, color: RARITY_LINE_COLORS[rarity] }}>{RARITY_LABELS[rarity]}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {isSingleLine && chartActiveRarities.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+          <span
+            style={{
+              display: "inline-block",
+              width: 10,
+              height: 3,
+              borderRadius: 2,
+              backgroundColor: RARITY_LINE_COLORS[rarityFilter as Rarity],
+            }}
+          />
+          <span style={{ fontSize: 12, color: RARITY_LINE_COLORS[rarityFilter as Rarity], fontWeight: 600 }}>
+            {RARITY_LABELS[rarityFilter as Rarity]}
+          </span>
+        </div>
+      )}
       <ResponsiveContainer width="100%" height={200}>
         <LineChart data={chartData}>
           <CartesianGrid strokeDasharray="3 3" stroke="#2d2d44" />
@@ -463,7 +691,7 @@ function PriceTrendChart() {
             }}
             labelStyle={{ color: "#9ca3af" }}
           />
-          {activeRarities.map((rarity) => (
+          {chartActiveRarities.map((rarity) => (
             <Line
               key={rarity}
               type="monotone"
@@ -477,12 +705,20 @@ function PriceTrendChart() {
           ))}
         </LineChart>
       </ResponsiveContainer>
+      <div style={{ display: "flex", gap: 16, marginTop: 10, paddingTop: 8, borderTop: "1px solid #2d2d44" }}>
+        <div style={{ fontSize: 12, color: "#9ca3af" }}>
+          {filterLabel} 均价：<span style={{ color: "#60a5fa", fontWeight: 600 }}>{avgForFilter}</span> 金币
+        </div>
+        <div style={{ fontSize: 12, color: "#9ca3af" }}>
+          建议范围：<span style={{ color: "#22C55E", fontWeight: 600 }}>{suggestedForFilter.min} - {suggestedForFilter.max}</span> 金币
+        </div>
+      </div>
     </div>
   )
 }
 
 export default function Market() {
-  const { marketItems, announcements, buyMarketItem, player } = useGameStore()
+  const { marketItems, announcements, buyMarketItem, player, priceHistory } = useGameStore()
   const [search, setSearch] = useState("")
   const [categoryFilter, setCategoryFilter] = useState<TradeItemType | "all">("all")
 
@@ -542,7 +778,7 @@ export default function Market() {
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 16 }}>
               {filtered.map((item) => (
-                <MarketCard key={item.id} item={item} onBuy={() => buyMarketItem(item.id)} playerGold={player.gold} />
+                <MarketCard key={item.id} item={item} onBuy={() => buyMarketItem(item.id)} playerGold={player.gold} priceHistory={priceHistory} />
               ))}
             </div>
           )}

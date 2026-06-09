@@ -44,6 +44,21 @@ interface GameState {
   guildSeason: GuildSeasonState
   playerListings: SellRecord[]
   priceHistory: PriceHistoryEntry[]
+  savedRoutes: Array<{
+    id: string
+    name: string
+    startId: string
+    startName: string
+    endId: string
+    endName: string
+    lastResult?: {
+      gatheredResources: Record<string, number>
+      discoveries: string[]
+      sailWear: number
+      engineWear: number
+      completedAt: number
+    }
+  }>
   completedRoutes: Array<{
     route: FlightRoute
     gatheredResources: Record<string, number>
@@ -64,12 +79,18 @@ interface GameState {
   launchRoute: (route: FlightRoute) => void
   advanceRouteNode: () => void
   completeRoute: () => void
+  clearCurrentRoute: () => void
+  saveRoute: (name: string, startId: string, startName: string, endId: string, endName: string) => void
+  deleteSavedRoute: (id: string) => void
   startBattle: (attackerAirshipId: string, defenderAirshipId: string, airspaceId: string) => void
   advanceBattleRound: () => void
   launchGuildWar: (airshipId: string, airspaceId: string, action: "attack" | "defend") => void
   upgradeOutpost: (outpostId: string, resourceType: string, amount: number) => void
   buyMarketItem: (itemId: string) => void
   listMarketItem: (item: TradeItem) => void
+  cancelListing: (listingId: string) => void
+  repriceListing: (listingId: string, newPrice: number) => void
+  repairAirship: (airshipId: string, targetSail: number, targetEngine: number) => void
   addGold: (amount: number) => void
   addResource: (type: string, amount: number) => void
   addAnnouncement: (ann: Announcement) => void
@@ -142,6 +163,7 @@ export const useGameStore = create<GameState>()(
       guildSeason: createGuildSeason(INITIAL_AIRSPACES),
       playerListings: [],
       priceHistory: [],
+      savedRoutes: [],
       completedRoutes: [],
 
       buildAirship: (name, type, keel, engine, sail, special) => {
@@ -399,6 +421,25 @@ export const useGameStore = create<GameState>()(
           completedAt: Date.now(),
         }
 
+        const firstNode = progress.route.nodes[0]
+        const lastNode = progress.route.nodes[progress.route.nodes.length - 1]
+
+        const updatedSavedRoutes = state.savedRoutes.map(sr => {
+          if (sr.startId === firstNode?.airspaceId && sr.endId === lastNode?.airspaceId) {
+            return {
+              ...sr,
+              lastResult: {
+                gatheredResources: progress.gatheredResources,
+                discoveries: progress.discoveries,
+                sailWear: progress.sailWear,
+                engineWear: progress.engineWear,
+                completedAt: Date.now(),
+              },
+            }
+          }
+          return sr
+        })
+
         set(state => ({
           player: {
             ...state.player,
@@ -418,10 +459,30 @@ export const useGameStore = create<GameState>()(
           currentExplorationAirspaceId: null,
           currentEvent: null,
           completedRoutes: [completedEntry, ...state.completedRoutes],
+          savedRoutes: updatedSavedRoutes,
           announcements: [
             { id: `ann_${Date.now()}_route`, type: "discovery" as const, message: `【返航】${progress.route.airshipName} 完成航线探索！发现 ${progress.discoveries.length} 个新空域`, timestamp: Date.now() },
             ...state.announcements,
           ],
+        }))
+      },
+
+      clearCurrentRoute: () => {
+        set({ currentRoute: null })
+      },
+
+      saveRoute: (name, startId, startName, endId, endName) => {
+        set(state => ({
+          savedRoutes: [
+            ...state.savedRoutes,
+            { id: `sr_${Date.now()}`, name, startId, startName, endId, endName },
+          ],
+        }))
+      },
+
+      deleteSavedRoute: (id) => {
+        set(state => ({
+          savedRoutes: state.savedRoutes.filter(sr => sr.id !== id),
         }))
       },
 
@@ -646,6 +707,67 @@ export const useGameStore = create<GameState>()(
         set(state => ({
           marketItems: [...state.marketItems, item],
           playerListings: [...state.playerListings, sellRecord],
+        }))
+      },
+
+      cancelListing: (listingId) => {
+        const state = get()
+        const listing = state.playerListings.find(l => l.id === listingId)
+        if (!listing || listing.status !== "active") return
+        set(state => ({
+          playerListings: state.playerListings.map(l =>
+            l.id === listingId ? { ...l, status: "cancelled" as const } : l
+          ),
+          marketItems: state.marketItems.filter(i => i.id !== listing.itemId),
+        }))
+      },
+
+      repriceListing: (listingId, newPrice) => {
+        const state = get()
+        const listing = state.playerListings.find(l => l.id === listingId)
+        if (!listing || listing.status !== "active" || newPrice <= 0) return
+        set(state => ({
+          playerListings: state.playerListings.map(l =>
+            l.id === listingId ? { ...l, price: newPrice } : l
+          ),
+          marketItems: state.marketItems.map(i =>
+            i.id === listing.itemId ? { ...i, price: newPrice } : i
+          ),
+        }))
+      },
+
+      repairAirship: (airshipId, targetSail, targetEngine) => {
+        const state = get()
+        const airship = state.player.airships.find(a => a.id === airshipId)
+        if (!airship) return
+        const sailRepair = Math.max(0, targetSail - airship.sailIntegrity)
+        const engineRepair = Math.max(0, targetEngine - airship.enginePower)
+        if (sailRepair <= 0 && engineRepair <= 0) return
+        const goldCost = (sailRepair + engineRepair) * 3
+        const fabricCost = Math.ceil(sailRepair / 5)
+        const ironwoodCost = Math.ceil(engineRepair / 5)
+        if (state.player.gold < goldCost) return
+        if ((state.player.resources.fabric || 0) < fabricCost) return
+        if ((state.player.resources.ironwood || 0) < ironwoodCost) return
+        set(state => ({
+          player: {
+            ...state.player,
+            gold: state.player.gold - goldCost,
+            resources: {
+              ...state.player.resources,
+              fabric: (state.player.resources.fabric || 0) - fabricCost,
+              ironwood: (state.player.resources.ironwood || 0) - ironwoodCost,
+            },
+            airships: state.player.airships.map(a =>
+              a.id === airshipId
+                ? {
+                    ...a,
+                    sailIntegrity: Math.min(100, a.sailIntegrity + sailRepair),
+                    enginePower: Math.min(100, a.enginePower + engineRepair),
+                  }
+                : a
+            ),
+          },
         }))
       },
 
