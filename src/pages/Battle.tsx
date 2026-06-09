@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Swords, Shield, Flame, Skull, Trophy, AlertCircle } from "lucide-react"
+import { Swords, Shield, Flame, Skull, Trophy, AlertCircle, CloudLightning } from "lucide-react"
 import { useGameStore } from "@/store/gameStore"
 import { calculateCombatPower } from "@/engine/statsCalc"
 import { calculateAdvantage } from "@/engine/battleSim"
@@ -37,7 +37,7 @@ function DamageReportPanel({ title, damage, isEnemy }: { title: string; damage: 
 }
 
 export default function Battle() {
-  const { player, airspaces, battleState, battleReports, startBattle } = useGameStore()
+  const { player, airspaces, battleState, battleReports, startBattle, isStormSeason } = useGameStore()
   const [selectedAirshipId, setSelectedAirshipId] = useState<string>("")
   const [selectedAirspaceId, setSelectedAirspaceId] = useState<string>("")
 
@@ -87,6 +87,23 @@ export default function Battle() {
 
   return (
     <div className="space-y-6">
+      {isStormSeason && (
+        <div style={{
+          padding: "10px 16px",
+          borderRadius: 8,
+          border: "1px solid #ef444444",
+          backgroundColor: "#ef444418",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          fontSize: 13,
+          color: "#fca5a5",
+        }}>
+          <CloudLightning className="w-4 h-4" />
+          ⚠️ 暴风季预警：当前飞行风险升高，战斗伤害可能增加，请做好防御准备
+        </div>
+      )}
+
       {/* === 争夺战发起面板 === */}
       <section className="rounded-xl border border-amber-900/40 bg-gradient-to-br from-gray-900 via-gray-900 to-amber-950/20 p-5">
         <h2 className="text-lg font-bold flex items-center gap-2 mb-4">

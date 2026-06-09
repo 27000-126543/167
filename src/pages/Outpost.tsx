@@ -21,7 +21,8 @@ function ContributionModal({
   const [amount, setAmount] = useState(10)
 
   const owned = player.resources[resourceType] ?? 0
-  const canContribute = amount > 0 && amount <= owned
+  const goldCost = amount * 5
+  const canContribute = amount > 0 && amount <= owned && player.gold >= goldCost
 
   function handleContribute() {
     if (!canContribute) return
@@ -74,6 +75,13 @@ function ContributionModal({
               onChange={e => setAmount(Math.max(1, parseInt(e.target.value) || 0))}
             />
           </div>
+          <div className="text-xs text-gray-400">
+            金币消耗：<span className={player.gold >= goldCost ? "text-yellow-400" : "text-red-400"}>{goldCost} 金币</span>
+            （拥有 {player.gold} 金币）
+          </div>
+          {player.gold < goldCost && (
+            <div className="text-xs text-red-400">金币不足，无法确认捐献</div>
+          )}
         </div>
 
         <div className="flex gap-3 mt-5">

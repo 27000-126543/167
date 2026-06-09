@@ -265,7 +265,17 @@ export const useGameStore = create<GameState>()(
       },
 
       upgradeOutpost: (outpostId, resourceType, amount) => {
+        const state = get()
+        const goldCost = amount * 5
+        const ownedResource = state.player.resources[resourceType] ?? 0
+        if (ownedResource < amount || state.player.gold < goldCost) return
+
         set(state => ({
+          player: {
+            ...state.player,
+            resources: { ...state.player.resources, [resourceType]: ownedResource - amount },
+            gold: state.player.gold - goldCost,
+          },
           outposts: state.outposts.map(o => {
             if (o.id !== outpostId) return o
             const newContribution = { ...o.contribution, [resourceType]: (o.contribution[resourceType] || 0) + amount }
@@ -293,11 +303,12 @@ export const useGameStore = create<GameState>()(
         set(state => ({
           player: { ...state.player, gold: state.player.gold - item.price },
           marketItems: state.marketItems.filter(i => i.id !== itemId),
+          isStormSeason: true,
           announcements: [
+            { id: `ann_${Date.now()}_storm`, type: "storm" as const, message: `【暴风季】交易完成触发暴风季！今日飞行风险大幅提升！`, timestamp: Date.now() },
             { id: `ann_${Date.now()}`, type: "trade" as const, message: `【交易】舰长 以 ${item.price} 金币购入 ${item.name}`, timestamp: Date.now() },
             ...state.announcements,
           ],
-          isStormSeason: Math.random() > 0.7,
         }))
       },
 

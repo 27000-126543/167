@@ -1,4 +1,6 @@
-import type { TradeItem, Announcement, LeaderboardEntry, WeeklyReport } from "@/types"
+import type { TradeItem, Announcement, LeaderboardEntry, WeeklyReport, Airship } from "@/types"
+import { KEEL_COMPONENTS, ENGINE_COMPONENTS, SAIL_COMPONENTS, SPECIAL_COMPONENTS } from "@/data/components"
+import { calculateAirshipStats } from "@/engine/statsCalc"
 
 const SELLER_NAMES = ["飞翼商人", "龙骨铸造师", "风暴掠夺者", "星空旅者", "暗影交易者", "云中行者", "铁锤匠人", "苍穹猎手"]
 
@@ -36,9 +38,33 @@ export function generateLeaderboard(): LeaderboardEntry[] {
   const names = ["风暴猎手", "星辰旅者", "铁翼先锋", "翡翠领主", "赤焰战神", "苍穹之眼", "暗夜行者", "银霜骑士", "碧波导航", "金耀船长"]
   const types: Array<"exploration" | "combat" | "cargo"> = ["exploration", "combat", "cargo"]
   const guildNames = ["天际联盟", "铁翼商会", "星尘骑士团", "苍穹海盗团", "翡翠飞舟会", "赤焰军团"]
-  
+  const outpostNames = ["翡翠前哨站", "星辉前哨站", "赤焰前哨站", "苍穹前哨站"]
+
   for (let i = 0; i < 10; i++) {
+    const type = types[i % 3]
+    const keel = KEEL_COMPONENTS[Math.min(i, KEEL_COMPONENTS.length - 1)]
+    const engine = ENGINE_COMPONENTS[Math.min(i, ENGINE_COMPONENTS.length - 1)]
+    const sail = SAIL_COMPONENTS[Math.min(i, SAIL_COMPONENTS.length - 1)]
+    const special = i >= 3 ? SPECIAL_COMPONENTS[i % SPECIAL_COMPONENTS.length] : null
+    const stats = calculateAirshipStats(type, keel, engine, sail, special)
+
+    const airshipConfig: Airship = {
+      id: `lb_airship_${i}`,
+      name: `${names[i]}号`,
+      type,
+      keel, engine, sail,
+      specialDevice: special,
+      stats,
+      crew: [],
+      status: "docked",
+      currentAltitude: 500,
+      currentOxygen: 100,
+      sailIntegrity: 100,
+      enginePower: 100,
+    }
+
     const power = Math.floor(Math.random() * 300) + 200 - i * 20
+    const guildIdx = i % guildNames.length
     entries.push({
       rank: i + 1,
       name: names[i],
@@ -46,8 +72,14 @@ export function generateLeaderboard(): LeaderboardEntry[] {
       airshipType: types[i % 3],
       combatPower: power,
       airspaceScore: Math.floor(Math.random() * 500) + 100 - i * 30,
-      guildName: guildNames[i % guildNames.length],
+      guildName: guildNames[guildIdx],
       wealth: Math.floor(Math.random() * 20000) + 5000 - i * 1000,
+      airshipConfig,
+      outpostSummary: {
+        count: Math.floor(Math.random() * 4) + 1,
+        totalLevel: Math.floor(Math.random() * 8) + 2,
+        names: outpostNames.slice(0, Math.floor(Math.random() * 3) + 1),
+      },
     })
   }
   entries.sort((a, b) => b.combatPower - a.combatPower)

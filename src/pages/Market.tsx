@@ -2,7 +2,7 @@ import { useState } from "react"
 import { useGameStore } from "@/store/gameStore"
 import { RARITY_LABELS, RARITY_COLORS } from "@/types"
 import type { TradeItem, TradeItemType } from "@/types"
-import { isPriceInRange, calculateSuggestedPrice, generateTradeId } from "@/engine/priceEngine"
+import { isPriceInRange, calculateSuggestedPrice, getAvgPrice7d, generateTradeId } from "@/engine/priceEngine"
 import { ShoppingBag, Tag, TrendingUp, DollarSign, Search, Filter } from "lucide-react"
 
 function PriceBadge({ price, suggestedMin, suggestedMax }: { price: number; suggestedMin: number; suggestedMax: number }) {
@@ -111,7 +111,9 @@ function SellPanel() {
     : []
 
   const selectedPart = parts.find((p) => p.key === selectedPartKey)
-  const suggested = selectedPart ? calculateSuggestedPrice(0, selectedPart.comp.rarity) : null
+  const componentCategory = selectedPart ? (selectedPart.key === "special" ? "special" : selectedPart.key) : undefined
+  const suggested = selectedPart ? calculateSuggestedPrice(0, selectedPart.comp.rarity, componentCategory) : null
+  const avgPrice = selectedPart ? getAvgPrice7d(selectedPart.comp.rarity, componentCategory) : 0
 
   function handleList() {
     if (!selectedPart) return
@@ -126,7 +128,7 @@ function SellPanel() {
       price,
       suggestedMin: suggested?.min ?? price,
       suggestedMax: suggested?.max ?? price,
-      avgPrice7d: price,
+      avgPrice7d: avgPrice || price,
       rarity: selectedPart.comp.rarity,
       listedAt: Date.now(),
       description: selectedPart.comp.description,

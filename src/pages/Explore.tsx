@@ -80,6 +80,7 @@ export default function Explore() {
   const player = useGameStore((s) => s.player)
   const airspaces = useGameStore((s) => s.airspaces)
   const currentEvent = useGameStore((s) => s.currentEvent)
+  const isStormSeason = useGameStore((s) => s.isStormSeason)
   const startExploration = useGameStore((s) => s.startExploration)
   const triggerEvent = useGameStore((s) => s.triggerEvent)
   const resolveEvent = useGameStore((s) => s.resolveEvent)
@@ -128,6 +129,23 @@ export default function Explore() {
         <Compass className="w-5 h-5" />
         空域探索
       </h1>
+
+      {isStormSeason && (
+        <div style={{
+          padding: "10px 16px",
+          borderRadius: 8,
+          border: "1px solid #ef444444",
+          backgroundColor: "#ef444418",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          fontSize: 13,
+          color: "#fca5a5",
+        }}>
+          <Wind className="w-4 h-4" />
+          ⚠️ 暴风季预警：当前飞行风险升高，探索事件可能遭遇强风暴，请谨慎出行
+        </div>
+      )}
 
       <div className="card-metal p-4 rounded-lg overflow-auto">
         <svg

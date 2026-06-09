@@ -1,9 +1,10 @@
 import { useState } from "react"
 import { useGameStore } from "@/store/gameStore"
-import { AIRSHIP_TYPE_LABELS } from "@/types"
+import { AIRSHIP_TYPE_LABELS, RARITY_LABELS, RARITY_COLORS } from "@/types"
 import type { LeaderboardEntry } from "@/types"
 import { calculateCombatPower, getStatLabel } from "@/engine/statsCalc"
 import { Trophy, Crown, Medal, ChevronDown, ChevronUp } from "lucide-react"
+import StatRadar from "@/components/StatRadar"
 
 type TabKey = "combat" | "airspace" | "wealth"
 
@@ -93,28 +94,70 @@ function AirshipConfigDetail({ entry }: { entry: LeaderboardEntry }) {
   const { airshipConfig } = entry
   const combatPower = calculateCombatPower(airshipConfig.stats)
   return (
-    <div style={{ padding: "8px 0", display: "flex", flexDirection: "column", gap: 6 }}>
-      <div style={{ fontSize: 13, color: "#d1d5db", fontWeight: 600 }}>
-        飞艇「{airshipConfig.name}」配置
+    <div style={{ padding: "8px 0", display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", gap: 20, alignItems: "flex-start" }}>
+        <div style={{ flexShrink: 0 }}>
+          <StatRadar stats={airshipConfig.stats} size={160} />
+        </div>
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ fontSize: 13, color: "#d1d5db", fontWeight: 600 }}>
+            飞艇「{airshipConfig.name}」
+          </div>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 12, color: "#9ca3af" }}>
+            <span>类型：{AIRSHIP_TYPE_LABELS[airshipConfig.type]}</span>
+            <span>综合战力：<span style={{ color: "#fbbf24" }}>{combatPower}</span></span>
+          </div>
+          <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12 }}>
+            {(Object.entries(airshipConfig.stats) as [keyof typeof airshipConfig.stats, number][]).map(([key, val]) => (
+              <span key={key} style={{ color: "#60a5fa" }}>
+                {getStatLabel(key)}：{val}
+              </span>
+            ))}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#9ca3af", marginTop: 4 }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <span style={{ color: "#6b7280" }}>龙骨：</span>
+              <span style={{ color: RARITY_COLORS[airshipConfig.keel.rarity] }}>{airshipConfig.keel.name}</span>
+              <span style={{ fontSize: 10, color: "#4b5563" }}>({RARITY_LABELS[airshipConfig.keel.rarity]})</span>
+            </div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <span style={{ color: "#6b7280" }}>引擎：</span>
+              <span style={{ color: RARITY_COLORS[airshipConfig.engine.rarity] }}>{airshipConfig.engine.name}</span>
+              <span style={{ fontSize: 10, color: "#4b5563" }}>({RARITY_LABELS[airshipConfig.engine.rarity]})</span>
+            </div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <span style={{ color: "#6b7280" }}>帆翼：</span>
+              <span style={{ color: RARITY_COLORS[airshipConfig.sail.rarity] }}>{airshipConfig.sail.name}</span>
+              <span style={{ fontSize: 10, color: "#4b5563" }}>({RARITY_LABELS[airshipConfig.sail.rarity]})</span>
+            </div>
+            {airshipConfig.specialDevice && (
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <span style={{ color: "#6b7280" }}>特殊装置：</span>
+                <span style={{ color: RARITY_COLORS[airshipConfig.specialDevice.rarity] }}>{airshipConfig.specialDevice.name}</span>
+                <span style={{ fontSize: 10, color: "#4b5563" }}>({RARITY_LABELS[airshipConfig.specialDevice.rarity]})</span>
+              </div>
+            )}
+            {!airshipConfig.specialDevice && (
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <span style={{ color: "#6b7280" }}>特殊装置：</span>
+                <span style={{ color: "#4b5563" }}>未安装</span>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
-      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12, color: "#9ca3af" }}>
-        <span>类型：{AIRSHIP_TYPE_LABELS[airshipConfig.type]}</span>
-        <span>综合战力：{combatPower}</span>
-        <span>状态：{airshipConfig.status === "docked" ? "停泊" : airshipConfig.status === "exploring" ? "探索中" : airshipConfig.status === "battle" ? "战斗中" : "维修中"}</span>
-      </div>
-      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12 }}>
-        {(Object.entries(airshipConfig.stats) as [keyof typeof airshipConfig.stats, number][]).map(([key, val]) => (
-          <span key={key} style={{ color: "#60a5fa" }}>
-            {getStatLabel(key)}：{val}
-          </span>
-        ))}
-      </div>
-      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12, color: "#9ca3af" }}>
-        <span>龙骨：{airshipConfig.keel.name}</span>
-        <span>引擎：{airshipConfig.engine.name}</span>
-        <span>帆翼：{airshipConfig.sail.name}</span>
-        {airshipConfig.specialDevice && <span>特殊装置：{airshipConfig.specialDevice.name}</span>}
-      </div>
+      {entry.outpostSummary && (
+        <div style={{ marginTop: 4, padding: "8px 12px", borderRadius: 6, backgroundColor: "#0f0f1a", fontSize: 12 }}>
+          <div style={{ color: "#d1d5db", fontWeight: 600, marginBottom: 4 }}>前哨站布局</div>
+          <div style={{ display: "flex", gap: 16, color: "#9ca3af" }}>
+            <span>数量：{entry.outpostSummary.count}</span>
+            <span>总等级：{entry.outpostSummary.totalLevel}</span>
+          </div>
+          <div style={{ color: "#6b7280", marginTop: 2 }}>
+            {entry.outpostSummary.names.join("、")}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

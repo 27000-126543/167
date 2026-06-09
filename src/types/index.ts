@@ -191,6 +191,11 @@ export interface LeaderboardEntry {
   guildName: string
   wealth: number
   airshipConfig?: Airship
+  outpostSummary?: {
+    count: number
+    totalLevel: number
+    names: string[]
+  }
 }
 
 export interface PlayerState {
