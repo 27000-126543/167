@@ -14,6 +14,7 @@ import {
 } from "recharts"
 import { BarChart3, Download, TrendingUp, Globe } from "lucide-react"
 import { calculateCombatPower, getStatLabel } from "@/engine/statsCalc"
+import type { AirshipStats } from "@/types"
 import jsPDF from "jspdf"
 
 const GUILD_COLORS = ["#3b82f6", "#ef4444", "#22c55e", "#a855f7", "#f59e0b", "#06b6d4"]
@@ -159,9 +160,8 @@ export default function Report() {
     doc.text("Airship Combat Power Radar", 14, y)
     y += 8
 
-    const radarLabels = player.airships[0]
-      ? (Object.keys(player.airships[0].stats) as Array<keyof typeof player.airships[0].stats>).map(k => getStatLabel(k))
-      : ["Speed", "Maneuver", "Defense", "Capacity", "Range"]
+    const statKeys: Array<keyof AirshipStats> = ["maxSpeed", "maneuverability", "defense", "capacity", "range"]
+    const radarLabels = statKeys.map(k => getStatLabel(k))
 
     for (let i = 0; i < Math.min(player.airships.length, 3); i++) {
       const airship = player.airships[i]

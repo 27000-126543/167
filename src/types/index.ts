@@ -178,6 +178,7 @@ export interface WeeklyReport {
   territoryHeatmap: Array<{ name: string; value: number; guild: string }>
   attendanceCurve: Array<{ date: string; count: number }>
   tradeRevenue: Array<{ route: string; revenue: number }>
+  routeTrend: Array<{ day: string; explored: number; discovered: number; fuelCost: number }>
   topEvents: string[]
 }
 
@@ -196,6 +197,80 @@ export interface LeaderboardEntry {
     totalLevel: number
     names: string[]
   }
+}
+
+export interface RouteNode {
+  airspaceId: string
+  airspaceName: string
+  hexQ: number
+  hexR: number
+  terrain: Airspace["terrain"]
+  weather: Weather
+  dangerLevel: number
+  resources: Resource[]
+  discovered: boolean
+  owner: string | null
+}
+
+export interface FlightRoute {
+  id: string
+  airshipId: string
+  airshipName: string
+  nodes: RouteNode[]
+  estimatedDistance: number
+  estimatedFuel: number
+  estimatedDurability: number
+  estimatedRisk: number
+  estimatedResources: Resource[]
+  createdAt: number
+}
+
+export interface RouteProgress {
+  route: FlightRoute
+  currentNodeIndex: number
+  gatheredResources: Record<string, number>
+  discoveries: string[]
+  sailWear: number
+  engineWear: number
+  fuelUsed: number
+  startedAt: number
+  completedAt: number | null
+}
+
+export interface GuildWarRecord {
+  id: string
+  attackingGuild: string
+  defendingGuild: string
+  airspaceId: string
+  airspaceName: string
+  action: "attack" | "defend"
+  result: "victory" | "defeat" | "draw"
+  timestamp: number
+}
+
+export interface GuildSeasonState {
+  weekNumber: number
+  guildScores: Record<string, { points: number; wins: number; losses: number; controlledAirspaces: number }>
+  warRecords: GuildWarRecord[]
+}
+
+export interface SellRecord {
+  id: string
+  itemId: string
+  itemName: string
+  rarity: Rarity
+  category: string
+  price: number
+  status: "active" | "sold" | "cancelled"
+  listedAt: number
+  soldAt: number | null
+}
+
+export interface PriceHistoryEntry {
+  rarity: Rarity
+  category: string
+  price: number
+  timestamp: number
 }
 
 export interface PlayerState {
