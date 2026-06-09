@@ -1,0 +1,118 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background: #060E1A;
+  color: #E8E8E8;
+}
+
+@layer components {
+  .card-metal {
+    @apply bg-navy-800/80 border border-gold-500/20 rounded-lg backdrop-blur-sm;
+    background-image: linear-gradient(135deg, rgba(212,168,67,0.03) 0%, transparent 50%, rgba(42,157,143,0.03) 100%);
+  }
+
+  .card-metal-hover {
+    @apply card-metal transition-all duration-300;
+  }
+  .card-metal-hover:hover {
+    @apply border-gold-500/40;
+    box-shadow: 0 0 15px rgba(212,168,67,0.1), inset 0 0 15px rgba(212,168,67,0.02);
+  }
+
+  .btn-gold {
+    @apply px-4 py-2 rounded-md font-medium text-sm transition-all duration-200;
+    background: linear-gradient(135deg, #D4A843 0%, #B8922F 100%);
+    color: #0B1D3A;
+    box-shadow: 0 2px 8px rgba(212,168,67,0.3);
+  }
+  .btn-gold:hover {
+    box-shadow: 0 4px 16px rgba(212,168,67,0.5);
+    transform: translateY(-1px);
+  }
+  .btn-gold:active {
+    transform: translateY(0);
+  }
+  .btn-gold:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+  }
+
+  .btn-copper {
+    @apply px-4 py-2 rounded-md font-medium text-sm transition-all duration-200;
+    background: linear-gradient(135deg, #2A9D8F 0%, #228177 100%);
+    color: #E8E8E8;
+    box-shadow: 0 2px 8px rgba(42,157,143,0.3);
+  }
+  .btn-copper:hover {
+    box-shadow: 0 4px 16px rgba(42,157,143,0.5);
+    transform: translateY(-1px);
+  }
+
+  .btn-outline {
+    @apply px-4 py-2 rounded-md font-medium text-sm border border-gold-500/30 text-gold-400 transition-all duration-200;
+    background: transparent;
+  }
+  .btn-outline:hover {
+    @apply border-gold-500/60 bg-gold-500/5;
+  }
+
+  .stat-bar {
+    @apply h-2 rounded-full overflow-hidden bg-navy-900;
+  }
+  .stat-bar-fill {
+    @apply h-full rounded-full transition-all duration-500;
+  }
+
+  .rarity-common { color: #9CA3AF; }
+  .rarity-rare { color: #3B82F6; }
+  .rarity-epic { color: #A855F7; }
+  .rarity-legendary { color: #F59E0B; }
+
+  .bg-rarity-common { background-color: rgba(156,163,175,0.1); border-color: rgba(156,163,175,0.3); }
+  .bg-rarity-rare { background-color: rgba(59,130,246,0.1); border-color: rgba(59,130,246,0.3); }
+  .bg-rarity-epic { background-color: rgba(168,85,247,0.1); border-color: rgba(168,85,247,0.3); }
+  .bg-rarity-legendary { background-color: rgba(245,158,11,0.1); border-color: rgba(245,158,11,0.3); }
+
+  .section-title {
+    @apply font-cinzel text-xl font-bold text-gold-400 tracking-wide;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0B1D3A;
+}
+::-webkit-scrollbar-thumb {
+  background: #1A3F65;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2A9D8F;
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.shimmer {
+  background: linear-gradient(90deg, transparent 0%, rgba(212,168,67,0.05) 50%, transparent 100%);
+  background-size: 200% 100%;
+  animation: shimmer 3s infinite;
+}
